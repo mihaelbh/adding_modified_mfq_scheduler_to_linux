@@ -20,6 +20,9 @@
  *  Adaptive scheduling granularity, math enhancements by Peter Zijlstra
  *  Copyright (C) 2007 Red Hat, Inc., Peter Zijlstra
  */
+
+#ifndef MFQ_SCHED
+
 #include <linux/energy_model.h>
 #include <linux/mmap_lock.h>
 #include <linux/hugetlb_inline.h>
@@ -14274,3 +14277,5 @@ __init void init_sched_fair_class(void)
 	zalloc_cpumask_var(&nohz.idle_cpus_mask, GFP_NOWAIT);
 #endif
 }
+
+#endif // MFQ_SCHED

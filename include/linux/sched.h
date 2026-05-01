@@ -575,7 +575,12 @@ struct sched_statistics {
 struct sched_entity {
 	/* For load-balancing: */
 	struct load_weight		load;
+#ifdef MFQ_SCHED
+	struct list_head		node;
+	u64				prio;
+#else // MFQ_SCHED
 	struct rb_node			run_node;
+#endif // MFQ_SCHED
 	u64				deadline;
 	u64				min_vruntime;
 	u64				min_slice;

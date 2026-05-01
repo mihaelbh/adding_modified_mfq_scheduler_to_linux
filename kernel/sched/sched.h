@@ -692,7 +692,11 @@ struct cfs_rq {
 	u64			zero_vruntime_fi;
 #endif
 
+#ifdef MFQ_SCHED
+	struct list_head sched_queue[4];
+#else // MFQ_SCHED
 	struct rb_root_cached	tasks_timeline;
+#endif // MFQ_SCHED
 
 	/*
 	 * 'curr' points to the currently running entity on this cfs_rq.

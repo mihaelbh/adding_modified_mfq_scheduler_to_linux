@@ -21,7 +21,7 @@
  *  Copyright (C) 2007 Red Hat, Inc., Peter Zijlstra
  */
 
-#ifndef MFQ_SCHED
+#ifndef CONFIG_MFQ_SCHED
 
 #include <linux/energy_model.h>
 #include <linux/mmap_lock.h>
@@ -14278,4 +14278,4 @@ __init void init_sched_fair_class(void)
 #endif
 }
 
-#endif // MFQ_SCHED
+#endif // CONFIG_MFQ_SCHED

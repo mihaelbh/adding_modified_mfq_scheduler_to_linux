@@ -1,5 +1,5 @@
 
-#ifdef MFQ_SCHED
+#ifdef CONFIG_MFQ_SCHED
 
 const struct sched_class fair_sched_class;
 
@@ -54,4 +54,4 @@ DEFINE_SCHED_CLASS(fair) = {
 #endif
 };
 
-#endif
+#endif // CONFIG_MFQ_SCHED

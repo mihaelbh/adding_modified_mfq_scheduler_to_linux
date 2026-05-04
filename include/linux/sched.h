@@ -578,6 +578,7 @@ struct sched_entity {
 #ifdef CONFIG_MFQ_SCHED
 	struct list_head		node;
 	u64				prio;
+	u64				time_slice;
 #else // CONFIG_MFQ_SCHED
 	struct rb_node			run_node;
 #endif // CONFIG_MFQ_SCHED

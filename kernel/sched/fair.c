@@ -60,6 +60,13 @@
 #include "autogroup.h"
 
 #ifdef CONFIG_MFQ_SCHED
+
+static struct task_struct *pick_next_task_mfq(struct rq *rq, struct task_struct *prev, struct rq_flags *rf);
+
+#ifdef CONFIG_SCHED_CORE
+static int task_is_throttled_mfq(struct task_struct *p, int cpu);
+#endif // CONFIG_SCHED_CORE
+
 #include "mfq.c"
 #endif // CONFIG_MFQ_SCHED
 
@@ -13877,11 +13884,10 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
 	for(int i=0; i<4; i++) {
 		INIT_LIST_HEAD(&cfs_rq->sched_queue[i]);
 	}
-#else
+#endif // CONFIG_SCHED_MFQ
 	cfs_rq->tasks_timeline = RB_ROOT_CACHED;
 	cfs_rq->zero_vruntime = (u64)(-(1LL << 20));
 	raw_spin_lock_init(&cfs_rq->removed.lock);
-#endif // CONFIG_SCHED_MFQ
 }
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
@@ -14191,7 +14197,7 @@ DEFINE_SCHED_CLASS(fair) = {
 
 	.pick_task		= pick_task_mfq,
 	.pick_next_task		= pick_next_task_mfq,
-	.put_prev_task		= put_prevtask_mfq,
+	.put_prev_task		= put_prev_task_mfq,
 	.set_next_task          = set_next_task_mfq,
 
 	.select_task_rq		= select_task_rq_mfq,
@@ -14217,7 +14223,7 @@ DEFINE_SCHED_CLASS(fair) = {
 	.update_curr		= update_curr_mfq,
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
-	.task_change_group	= task_changed_group_mfq,
+	.task_change_group	= task_change_group_mfq,
 #endif
 
 #ifdef CONFIG_SCHED_CORE
@@ -14229,7 +14235,7 @@ DEFINE_SCHED_CLASS(fair) = {
 #endif
 };
 
-#else
+#else // CONFIG_MFQ_SCHED
 
 DEFINE_SCHED_CLASS(fair) = {
 	.enqueue_task		= enqueue_task_fair,

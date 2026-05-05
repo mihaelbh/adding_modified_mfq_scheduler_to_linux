@@ -694,9 +694,8 @@ struct cfs_rq {
 
 #ifdef CONFIG_MFQ_SCHED
 	struct list_head sched_queue[4];
-#else // CONFIG_MFQ_SCHED
-	struct rb_root_cached	tasks_timeline;
 #endif // CONFIG_MFQ_SCHED
+	struct rb_root_cached	tasks_timeline;
 
 	/*
 	 * 'curr' points to the currently running entity on this cfs_rq.

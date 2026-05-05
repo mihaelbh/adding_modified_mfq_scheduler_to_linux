@@ -579,9 +579,8 @@ struct sched_entity {
 	struct list_head		node;
 	u64				prio;
 	u64				time_slice;
-#else // CONFIG_MFQ_SCHED
-	struct rb_node			run_node;
 #endif // CONFIG_MFQ_SCHED
+	struct rb_node			run_node;
 	u64				deadline;
 	u64				min_vruntime;
 	u64				min_slice;

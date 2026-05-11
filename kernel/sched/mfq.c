@@ -68,15 +68,6 @@ static bool yield_to_task_mfq(struct rq *rq, struct task_struct *p) {
 
 	yield_task_mfq(rq);
 
-	if(p == NULL) {
-		return false;
-	}
-
-	// push the task that we are yielding to to the front of the queue
-	// (but if there is a task in higher priority queue he will start first)
-	list_del_init(&p->se.node);
-	list_add(&p->se.node, &rq->cfs.sched_queue[p->se.prio]);
-
 	return true;
 }
 
@@ -87,6 +78,10 @@ static void wakeup_preempt_mfq(struct rq *rq, struct task_struct *p, int wake_fl
 
 	if(p->sched_class != &fair_sched_class) {
 		return;
+	}
+
+	if(rq->curr->sched_class == &idle_sched_class) {
+		resched_curr(rq);
 	}
 
 	if(rq->curr->se.prio > p->se.prio) {
@@ -168,6 +163,10 @@ static void update_curr_mfq(struct rq *rq) {
 
 	if(p == NULL || rq->curr == NULL) {
 		return;
+	}
+
+	if(rq->curr->sched_class == &idle_sched_class) {
+		resched_curr(rq);
 	}
 
 	if(p->se.prio < rq->curr->se.prio) {

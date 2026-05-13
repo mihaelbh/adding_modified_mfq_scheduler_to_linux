@@ -3,12 +3,21 @@
 // resets timeslice and puts task in a queue depending on prio
 static void put_in_queue(struct task_struct *p, struct rq *rq) {
 	p->se.time_slice = RR_TIMESLICE;
-	list_add_tail(&p->se.node, &rq->cfs.sched_queue[p->se.prio]);
+
+	if(p->se.on_rq == 0) {
+		list_add_tail(&p->se.node, &rq->cfs.sched_queue[p->se.prio]);
+		p->se.on_rq = 1;
+		add_nr_running(rq, 1);
+	}
 }
 
 // remove task from queue
-static void remove_from_queue(struct task_struct *p) {
-	list_del_init(&p->se.node);
+static void remove_from_queue(struct task_struct *p, struct rq *rq) {
+	if(p->se.on_rq == 1) {
+		list_del_init(&p->se.node);
+		p->se.on_rq = 0;
+		sub_nr_running(rq, 1);
+	}
 }
 
 // go through rq and get the first task in highest priority non-empty queue
@@ -47,7 +56,7 @@ static bool dequeue_task_mfq(struct rq *rq, struct task_struct *p, int flags) {
 		return false;
 	}
 
-	remove_from_queue(p);
+	remove_from_queue(p, rq);
 
 	return true;
 }
@@ -57,7 +66,7 @@ static void yield_task_mfq(struct rq *rq) {
 		return;
 	}
 
-	remove_from_queue(rq->curr);
+	remove_from_queue(rq->curr, rq);
 	put_in_queue(rq->curr, rq);
 }
 
@@ -125,7 +134,7 @@ static void task_tick_mfq(struct rq *rq, struct task_struct *curr, int queued) {
 		return;
 	}
 
-	remove_from_queue(curr);
+	remove_from_queue(curr, rq);
 	if(curr->se.prio < 3) {
 		curr->se.prio++;
 	}

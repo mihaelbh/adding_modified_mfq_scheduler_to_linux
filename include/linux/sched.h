@@ -577,8 +577,25 @@ struct sched_entity {
 	struct load_weight		load;
 #ifdef CONFIG_MFQ_SCHED
 	struct list_head		node;
-	u64				prio;
 	u64				time_slice;
+
+	/* current run (since become ready) */
+	u32				prio;
+	u64				curr_become_ready_nsec;
+	u64				curr_processing_time_nsec;
+	u64				curr_started_executing_nsec;
+	u64				curr_stopped_executing_nsec;
+
+	/* previous run (before the last dequeued) */
+	u32				prev_prio;
+	u64				prev_become_ready_nsec;
+	u64				prev_gone_from_ready_nsec;
+	u64				prev_processing_time_nsec;
+
+	/* cumulative stats */
+	u64				sum_exec_time_nsec;
+	u64				sum_sleep_time_nsec;
+
 #endif // CONFIG_MFQ_SCHED
 	struct rb_node			run_node;
 	u64				deadline;

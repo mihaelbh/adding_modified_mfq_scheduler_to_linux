@@ -1,8 +1,29 @@
 #include <linux/sched/rt.h>
 
-// resets timeslice and puts task in a queue depending on prio
+#define STARVATION_COUNT	5
+#define STARVATION_PERIOD_MS	100
+
+int starvation_counter = 0;
+
+// calculate prio from
+static void calculate_prio(struct task_struct *p) {
+	u64 sleep = p->se.sum_sleep_time_nsec;
+	u64 exec = p->se.sum_exec_time_nsec;
+
+	if(sleep >= (exec << 2)) {		// if sleep >= 4*exec
+		p->se.prio = 0;
+	} else if(sleep >= (exec << 1)) {	// if sleep >= 2*exec
+		p->se.prio = 1;
+	} else if(sleep >= exec) {		// if sleep >= exec
+		p->se.prio = 2;
+	} else {				// if sleep < exec
+		p->se.prio = 3;
+	}
+}
+
+// resets timeslice and puts task in a queue, depending on prio
 static void put_in_queue(struct task_struct *p, struct rq *rq) {
-	p->se.time_slice = RR_TIMESLICE;
+	p->se.time_slice = RR_TIMESLICE + (p->se.prio * RR_TIMESLICE);
 
 	if(p->se.on_rq == 0) {
 		list_add_tail(&p->se.node, &rq->cfs.sched_queue[p->se.prio]);
@@ -38,6 +59,38 @@ static struct task_struct *get_highest_prio_task(struct rq *rq) {
 	return p;
 }
 
+// go through queues and find task that stopped executing first
+static struct task_struct *get_first_stopped_task(struct rq *rq) {
+	int i;
+	struct sched_entity *se = list_first_entry_or_null(&rq->cfs.sched_queue[0], struct sched_entity, node);
+	struct task_struct *task1;
+	if(se != NULL) {
+		task1 = task_of(se);
+	} else {
+		task1 = NULL;
+	}
+	struct task_struct *task2 = NULL;
+
+	for(i=1; i<4; i++) {
+		se = list_first_entry_or_null(&rq->cfs.sched_queue[i], struct sched_entity, node);
+		if(se != NULL) {
+			task2 = task_of(se);
+		} else {
+			task2 = NULL;
+		}
+
+		if(task1 != NULL && task2 != NULL) {
+			if(task1->se.curr_stopped_executing_nsec > task2->se.curr_stopped_executing_nsec) {
+				task1 = task2;
+			}
+		} else if(task1 == NULL && task2 != NULL) {
+			task1 = task2;
+		}
+	}
+
+	return task1;
+}
+
 // helpful functions
 // ==============================================================================================================
 // sched_class functions
@@ -47,7 +100,16 @@ static void enqueue_task_mfq(struct rq *rq, struct task_struct *p, int flags) {
 		return;
 	}
 
-	p->se.prio = 0;
+	if(p->se.sum_exec_time_nsec > 0) {
+		// enqueued before
+		p->se.sum_sleep_time_nsec += sched_clock() - p->se.prev_gone_from_ready_nsec;
+		calculate_prio(p);
+	} else {
+		// enqueued for the first time
+		p->se.prio = 0;
+	}
+
+	p->se.curr_become_ready_nsec = sched_clock();
 	put_in_queue(p, rq);
 }
 
@@ -57,6 +119,13 @@ static bool dequeue_task_mfq(struct rq *rq, struct task_struct *p, int flags) {
 	}
 
 	remove_from_queue(p, rq);
+
+	p->se.prev_prio = p->se.prio;
+	p->se.prev_become_ready_nsec = p->se.curr_become_ready_nsec;
+	p->se.prev_gone_from_ready_nsec = sched_clock();
+	p->se.prev_processing_time_nsec = p->se.curr_processing_time_nsec;
+	p->se.sum_exec_time_nsec += p->se.curr_processing_time_nsec;
+	p->se.curr_processing_time_nsec = 0;
 
 	return true;
 }
@@ -103,16 +172,37 @@ static struct task_struct *pick_task_mfq(struct rq *rq, struct rq_flags *rf) {
 		return NULL;
 	}
 
-	return get_highest_prio_task(rq);
+	struct task_struct *highest_prio = get_highest_prio_task(rq);
+
+	if(starvation_counter >= STARVATION_COUNT && highest_prio != NULL) {
+		starvation_counter = 0;
+
+		struct task_struct *starved_task = get_first_stopped_task(rq);
+
+		if((starved_task != NULL) && (starved_task != rq->curr) && (starved_task->se.curr_stopped_executing_nsec + (STARVATION_PERIOD_MS * 1000000) <= sched_clock())) {
+			highest_prio = starved_task;
+		}
+	} else {
+		starvation_counter++;
+	}
+
+	return highest_prio;
 }
 
 static struct task_struct *pick_next_task_mfq(struct rq *rq, struct task_struct *prev, struct rq_flags *rf) {
 	return pick_task_mfq(rq, rf);
 }
 
-static void put_prev_task_mfq(struct rq *rq, struct task_struct *prev, struct task_struct *next) {}
+// called when task stops executing
+static void put_prev_task_mfq(struct rq *rq, struct task_struct *prev, struct task_struct *next) {
+	prev->se.curr_stopped_executing_nsec = sched_clock();
+	prev->se.curr_processing_time_nsec += prev->se.curr_stopped_executing_nsec - prev->se.curr_started_executing_nsec;
+}
 
-static void set_next_task_mfq(struct rq *rq, struct task_struct *p, bool first) {}
+// called before task starts executing
+static void set_next_task_mfq(struct rq *rq, struct task_struct *p, bool first) {
+	p->se.curr_started_executing_nsec = sched_clock();
+}
 
 static int select_task_rq_mfq(struct task_struct *p, int prev_cpu, int wake_flags) {
 	return prev_cpu;

@@ -4463,6 +4463,24 @@ static void __sched_fork(u64 clone_flags, struct task_struct *p)
 	/* A delayed task cannot be in clone(). */
 	WARN_ON_ONCE(p->se.sched_delayed);
 
+#ifdef CONFIG_MFQ_SCHED
+	INIT_LIST_HEAD(&p->se.node);
+
+	p->se.prio = 0;
+	p->se.curr_become_ready_nsec = 0;
+	p->se.curr_processing_time_nsec = 0;
+	p->se.curr_started_executing_nsec = 0;
+	p->se.curr_stopped_executing_nsec = 0;
+
+	p->se.prev_prio = 0;
+	p->se.prev_become_ready_nsec = 0;
+	p->se.prev_gone_from_ready_nsec = 0;
+	p->se.prev_processing_time_nsec = 0;
+
+	p->se.sum_exec_time_nsec = 0;
+	p->se.sum_sleep_time_nsec = 0;
+#endif // CONFIG_MFQ_SCHED
+
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	p->se.cfs_rq			= NULL;
 #ifdef CONFIG_CFS_BANDWIDTH

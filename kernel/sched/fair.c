@@ -13884,6 +13884,8 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
 	for(int i=0; i<4; i++) {
 		INIT_LIST_HEAD(&cfs_rq->sched_queue[i]);
 	}
+
+	cfs_rq->starvation_counter = 0;
 #endif // CONFIG_SCHED_MFQ
 	cfs_rq->tasks_timeline = RB_ROOT_CACHED;
 	cfs_rq->zero_vruntime = (u64)(-(1LL << 20));

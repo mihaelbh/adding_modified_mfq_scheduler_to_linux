@@ -3,8 +3,6 @@
 #define STARVATION_COUNT	5
 #define STARVATION_PERIOD_MS	100
 
-int starvation_counter = 0;
-
 // calculate prio from
 static void calculate_prio(struct task_struct *p) {
 	u64 sleep = p->se.sum_sleep_time_nsec;
@@ -174,8 +172,8 @@ static struct task_struct *pick_task_mfq(struct rq *rq, struct rq_flags *rf) {
 
 	struct task_struct *highest_prio = get_highest_prio_task(rq);
 
-	if(starvation_counter >= STARVATION_COUNT && highest_prio != NULL) {
-		starvation_counter = 0;
+	if(rq->cfs.starvation_counter >= STARVATION_COUNT && highest_prio != NULL) {
+		rq->cfs.starvation_counter = 0;
 
 		struct task_struct *starved_task = get_first_stopped_task(rq);
 
@@ -183,7 +181,7 @@ static struct task_struct *pick_task_mfq(struct rq *rq, struct rq_flags *rf) {
 			highest_prio = starved_task;
 		}
 	} else {
-		starvation_counter++;
+		rq->cfs.starvation_counter++;
 	}
 
 	return highest_prio;
@@ -205,7 +203,13 @@ static void set_next_task_mfq(struct rq *rq, struct task_struct *p, bool first) 
 }
 
 static int select_task_rq_mfq(struct task_struct *p, int prev_cpu, int wake_flags) {
-	return prev_cpu;
+	if(cpumask_test_cpu(prev_cpu, p->cpus_ptr)) {
+		// if prev_cpu is in the cpumask then return prev_cpu
+		return prev_cpu;
+	}
+
+	// else return first cpu in cpumask
+	return cpumask_first(p->cpus_ptr);
 }
 
 static void migrate_task_rq_mfq(struct task_struct *p, int new_cpu) {}
@@ -216,7 +220,9 @@ static void rq_offline_mfq(struct rq *rq) {}
 
 static void task_dead_mfq(struct task_struct *p) {}
 
-static void set_cpus_allowed_mfq(struct task_struct *p, struct affinity_context *ctx) {}
+static void set_cpus_allowed_mfq(struct task_struct *p, struct affinity_context *ctx) {
+	set_cpus_allowed_common(p, ctx);
+}
 
 static void task_tick_mfq(struct rq *rq, struct task_struct *curr, int queued) {
 	curr->se.time_slice--;

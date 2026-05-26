@@ -1,54 +1,60 @@
 #include <linux/sched/rt.h>
 
-#define STARVATION_COUNT	5
-#define STARVATION_PERIOD_MS	100
+#define STARVATION_COUNT	50
+#define STARVATION_PERIOD_MS	500
+
+static unsigned int get_rr_interval_mfq(struct rq *rq, struct task_struct *task);
 
 // calculate prio from
 static void calculate_prio(struct task_struct *p) {
-	u64 sleep = p->se.sum_sleep_time_nsec;
-	u64 exec = p->se.sum_exec_time_nsec;
+	u64 sleep = p->se.curr_sleep_time_nsec;
+	u64 exec = p->se.prev_processing_time_nsec;
 
-	if(sleep >= (exec << 2)) {		// if sleep >= 4*exec
+	if(exec > 0 && sleep > 0) {
+		p->se.prio = (u32) (CONFIG_MFQ_QUEUE_NUM * exec) / (exec + sleep);
+	} else {
 		p->se.prio = 0;
-	} else if(sleep >= (exec << 1)) {	// if sleep >= 2*exec
-		p->se.prio = 1;
-	} else if(sleep >= exec) {		// if sleep >= exec
-		p->se.prio = 2;
-	} else {				// if sleep < exec
-		p->se.prio = 3;
+	}
+
+	if(p->se.prio >= CONFIG_MFQ_QUEUE_NUM) {
+		p->se.prio = CONFIG_MFQ_QUEUE_NUM - 1;
 	}
 }
 
 // resets timeslice and puts task in a queue, depending on prio
 static void put_in_queue(struct task_struct *p, struct rq *rq) {
-	p->se.time_slice = RR_TIMESLICE + (p->se.prio * RR_TIMESLICE);
-
-	if(p->se.on_rq == 0) {
-		list_add_tail(&p->se.node, &rq->cfs.sched_queue[p->se.prio]);
-		p->se.on_rq = 1;
-		add_nr_running(rq, 1);
+	if(p->se.on_rq == 1) {
+		return;
 	}
+
+	p->se.time_slice = get_rr_interval_mfq(rq, p);
+
+	list_add_tail(&p->se.node, &rq->cfs.sched_queue[p->se.prio]);
+	p->se.on_rq = 1;
+	add_nr_running(rq, 1);
 }
 
 // remove task from queue
 static void remove_from_queue(struct task_struct *p, struct rq *rq) {
-	if(p->se.on_rq == 1) {
-		list_del_init(&p->se.node);
-		p->se.on_rq = 0;
-		sub_nr_running(rq, 1);
+	if(p->se.on_rq == 0) {
+		return;
 	}
+
+	list_del_init(&p->se.node);
+	p->se.on_rq = 0;
+	sub_nr_running(rq, 1);
 }
 
 // go through rq and get the first task in highest priority non-empty queue
 static struct task_struct *get_highest_prio_task(struct rq *rq) {
 	int i;
-	for(i=0; i<4; i++) {
+	for(i=0; i<CONFIG_MFQ_QUEUE_NUM; i++) {
 		if(!list_empty(&rq->cfs.sched_queue[i])) {
 			break;
 		}
 	}
 
-	if(i > 3) {
+	if(i >= CONFIG_MFQ_QUEUE_NUM) {
 		return NULL;
 	}
 
@@ -69,7 +75,7 @@ static struct task_struct *get_first_stopped_task(struct rq *rq) {
 	}
 	struct task_struct *task2 = NULL;
 
-	for(i=1; i<4; i++) {
+	for(i=1; i<CONFIG_MFQ_QUEUE_NUM; i++) {
 		se = list_first_entry_or_null(&rq->cfs.sched_queue[i], struct sched_entity, node);
 		if(se != NULL) {
 			task2 = task_of(se);
@@ -98,9 +104,9 @@ static void enqueue_task_mfq(struct rq *rq, struct task_struct *p, int flags) {
 		return;
 	}
 
-	if(p->se.sum_exec_time_nsec > 0) {
+	if(p->se.prev_gone_from_ready_nsec != 0) {
 		// enqueued before
-		p->se.sum_sleep_time_nsec += sched_clock() - p->se.prev_gone_from_ready_nsec;
+		p->se.curr_sleep_time_nsec += sched_clock() - p->se.prev_gone_from_ready_nsec;
 		calculate_prio(p);
 	} else {
 		// enqueued for the first time
@@ -122,7 +128,6 @@ static bool dequeue_task_mfq(struct rq *rq, struct task_struct *p, int flags) {
 	p->se.prev_become_ready_nsec = p->se.curr_become_ready_nsec;
 	p->se.prev_gone_from_ready_nsec = sched_clock();
 	p->se.prev_processing_time_nsec = p->se.curr_processing_time_nsec;
-	p->se.sum_exec_time_nsec += p->se.curr_processing_time_nsec;
 	p->se.curr_processing_time_nsec = 0;
 
 	return true;
@@ -133,10 +138,11 @@ static void yield_task_mfq(struct rq *rq) {
 		return;
 	}
 
-	remove_from_queue(rq->curr, rq);
-	put_in_queue(rq->curr, rq);
+	rq->curr->se.time_slice = get_rr_interval_mfq(rq, rq->curr);
+	list_move_tail(&rq->curr->se.node, &rq->cfs.sched_queue[rq->curr->se.prio]);
 }
 
+// currently it doesn't yield to task, it just yields
 static bool yield_to_task_mfq(struct rq *rq, struct task_struct *p) {
 	if(rq == NULL) {
 		return false;
@@ -230,11 +236,12 @@ static void task_tick_mfq(struct rq *rq, struct task_struct *curr, int queued) {
 		return;
 	}
 
-	remove_from_queue(curr, rq);
-	if(curr->se.prio < 3) {
+	if(curr->se.prio < (CONFIG_MFQ_QUEUE_NUM - 1)) {
 		curr->se.prio++;
 	}
-	put_in_queue(curr, rq);
+
+	curr->se.time_slice = get_rr_interval_mfq(rq, curr);
+	list_move_tail(&curr->se.node, &rq->cfs.sched_queue[curr->se.prio]);
 
 	resched_curr(rq);
 }
@@ -259,8 +266,17 @@ static void switched_from_mfq(struct rq *rq, struct task_struct *p) {}
 
 static void switched_to_mfq(struct rq *rq, struct task_struct *p) {}
 
+// calculate timeslice
+// RR_timeslice is 10ms
+//
+// | prio	| timeslice	|
+// |------------|---------------|
+// | 0		| 10ms		|
+// | 1		| 20ms		|
+// | 2		| 30ms		|
+// | ...	| ...		|
 static unsigned int get_rr_interval_mfq(struct rq *rq, struct task_struct *task) {
-	return RR_TIMESLICE;
+	return (RR_TIMESLICE / 10) * (task->se.prio + 1);
 }
 
 static void update_curr_mfq(struct rq *rq) {

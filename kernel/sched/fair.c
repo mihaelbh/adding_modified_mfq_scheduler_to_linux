@@ -13881,7 +13881,7 @@ static void set_next_task_fair(struct rq *rq, struct task_struct *p, bool first)
 void init_cfs_rq(struct cfs_rq *cfs_rq)
 {
 #ifdef CONFIG_MFQ_SCHED
-	for(int i=0; i<4; i++) {
+	for(int i=0; i<CONFIG_MFQ_QUEUE_NUM; i++) {
 		INIT_LIST_HEAD(&cfs_rq->sched_queue[i]);
 	}
 

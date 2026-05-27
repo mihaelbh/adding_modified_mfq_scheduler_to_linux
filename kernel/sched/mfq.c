@@ -27,9 +27,8 @@ static void put_in_queue(struct task_struct *p, struct rq *rq) {
 		return;
 	}
 
-	p->se.time_slice = get_rr_interval_mfq(rq, p);
-
 	list_add_tail(&p->se.node, &rq->cfs.sched_queue[p->se.prio]);
+	rq->cfs.num_enqueued[p->se.prio]++;
 	p->se.on_rq = 1;
 	add_nr_running(rq, 1);
 }
@@ -41,6 +40,7 @@ static void remove_from_queue(struct task_struct *p, struct rq *rq) {
 	}
 
 	list_del_init(&p->se.node);
+	rq->cfs.num_enqueued[p->se.prio]--;
 	p->se.on_rq = 0;
 	sub_nr_running(rq, 1);
 }
@@ -138,7 +138,7 @@ static void yield_task_mfq(struct rq *rq) {
 		return;
 	}
 
-	rq->curr->se.time_slice = get_rr_interval_mfq(rq, rq->curr);
+	rq->curr->se.timeslice = get_rr_interval_mfq(rq, rq->curr);
 	list_move_tail(&rq->curr->se.node, &rq->cfs.sched_queue[rq->curr->se.prio]);
 }
 
@@ -204,8 +204,12 @@ static void put_prev_task_mfq(struct rq *rq, struct task_struct *prev, struct ta
 }
 
 // called before task starts executing
+// we set the timeslice here so the execution can be more fair
+// if it is set during enqueue then it could be unfair because other tasks enqueued after
+// because timeslice depends on number of tasks enqueued
 static void set_next_task_mfq(struct rq *rq, struct task_struct *p, bool first) {
 	p->se.curr_started_executing_nsec = sched_clock();
+	p->se.timeslice = get_rr_interval_mfq(rq, p);
 }
 
 static int select_task_rq_mfq(struct task_struct *p, int prev_cpu, int wake_flags) {
@@ -231,17 +235,26 @@ static void set_cpus_allowed_mfq(struct task_struct *p, struct affinity_context 
 }
 
 static void task_tick_mfq(struct rq *rq, struct task_struct *curr, int queued) {
-	curr->se.time_slice--;
-	if(curr->se.time_slice > 0) {
+	curr->se.timeslice--;
+	if(curr->se.timeslice > 0) {
+
+		// if a bunch of tasks enqueued since the task started executing
+		// check if timeslice needs to be readjusted
+		unsigned int new_timeslice = get_rr_interval_mfq(rq, curr);
+		if(curr->se.timeslice > new_timeslice) {
+			curr->se.timeslice = new_timeslice;
+		}
+
 		return;
 	}
 
+	rq->cfs.num_enqueued[curr->se.prio]--;
 	if(curr->se.prio < (CONFIG_MFQ_QUEUE_NUM - 1)) {
 		curr->se.prio++;
 	}
 
-	curr->se.time_slice = get_rr_interval_mfq(rq, curr);
 	list_move_tail(&curr->se.node, &rq->cfs.sched_queue[curr->se.prio]);
+	rq->cfs.num_enqueued[curr->se.prio]++;
 
 	resched_curr(rq);
 }
@@ -267,16 +280,25 @@ static void switched_from_mfq(struct rq *rq, struct task_struct *p) {}
 static void switched_to_mfq(struct rq *rq, struct task_struct *p) {}
 
 // calculate timeslice
-// RR_timeslice is 10ms
+// each queue gets predefined timeslice 20ms, 40ms, 80ms, 160ms ...
+// that timeslice is then equally divided between the tasks in that queue
 //
-// | prio	| timeslice	|
-// |------------|---------------|
-// | 0		| 10ms		|
-// | 1		| 20ms		|
-// | 2		| 30ms		|
-// | ...	| ...		|
+// for example task with prio 0 can get timeslice 20ms if it is the only one in the queue
+// or it can get timeslice 5ms if there is more than 4 tasks in the same queue
+// (it doesn't really make sense to go under 5ms timeslices)
 static unsigned int get_rr_interval_mfq(struct rq *rq, struct task_struct *task) {
-	return (RR_TIMESLICE / 10) * (task->se.prio + 1);
+	unsigned int timeslice = ((2 << task->se.prio) * 10) * HZ / 1000;
+
+	unsigned int num_tasks = rq->cfs.num_enqueued[task->se.prio];
+	if(num_tasks > 1) {
+		timeslice = timeslice / num_tasks;
+	}
+
+	if(timeslice < 5) {
+		timeslice = 5;
+	}
+
+	return timeslice;
 }
 
 static void update_curr_mfq(struct rq *rq) {

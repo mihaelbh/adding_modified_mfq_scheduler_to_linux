@@ -694,6 +694,7 @@ struct cfs_rq {
 
 #ifdef CONFIG_MFQ_SCHED
 	struct list_head sched_queue[CONFIG_MFQ_QUEUE_NUM];
+	u64 num_enqueued[CONFIG_MFQ_QUEUE_NUM];
 	unsigned int starvation_counter;
 #endif // CONFIG_MFQ_SCHED
 	struct rb_root_cached	tasks_timeline;

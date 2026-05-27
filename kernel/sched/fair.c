@@ -13883,6 +13883,7 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
 #ifdef CONFIG_MFQ_SCHED
 	for(int i=0; i<CONFIG_MFQ_QUEUE_NUM; i++) {
 		INIT_LIST_HEAD(&cfs_rq->sched_queue[i]);
+		cfs_rq->num_enqueued[i] = 0;
 	}
 
 	cfs_rq->starvation_counter = 0;

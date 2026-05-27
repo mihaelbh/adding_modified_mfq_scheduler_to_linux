@@ -577,7 +577,7 @@ struct sched_entity {
 	struct load_weight		load;
 #ifdef CONFIG_MFQ_SCHED
 	struct list_head		node;
-	u64				time_slice;
+	u64				timeslice;
 
 	/* current run (since become ready) */
 	u32				prio;

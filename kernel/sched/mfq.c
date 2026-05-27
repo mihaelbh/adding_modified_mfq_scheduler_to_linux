@@ -294,8 +294,9 @@ static unsigned int get_rr_interval_mfq(struct rq *rq, struct task_struct *task)
 		timeslice = timeslice / num_tasks;
 	}
 
-	if(timeslice < 5) {
-		timeslice = 5;
+	unsigned int min_timeslice = 5 * HZ / 1000;
+	if(timeslice < min_timeslice) {
+		timeslice = min_timeslice;
 	}
 
 	return timeslice;

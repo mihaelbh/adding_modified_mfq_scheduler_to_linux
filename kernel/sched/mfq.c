@@ -212,14 +212,42 @@ static void set_next_task_mfq(struct rq *rq, struct task_struct *p, bool first) 
 	p->se.timeslice = get_rr_interval_mfq(rq, p);
 }
 
+// select cpu to execute the task on
+// searches for cpu with lowest nr_running
+// happens on wakeup/fork
+// depens on rq->nr_running that also contains rr and deadline tasks, not just normal
 static int select_task_rq_mfq(struct task_struct *p, int prev_cpu, int wake_flags) {
-	if(cpumask_test_cpu(prev_cpu, p->cpus_ptr)) {
-		// if prev_cpu is in the cpumask then return prev_cpu
-		return prev_cpu;
+	int new_cpu = prev_cpu;
+	if(!cpumask_test_cpu(prev_cpu, p->cpus_ptr)) {
+		// if prev_cpu isn't in the allowed cpus, take the first allowed
+		new_cpu = cpumask_first(p->cpus_ptr);
 	}
 
-	// else return first cpu in cpumask
-	return cpumask_first(p->cpus_ptr);
+	struct rq *rq = cpu_rq(new_cpu);
+	int min_nr_running = rq->nr_running;
+
+	int cpu;
+	for_each_cpu(cpu, p->cpus_ptr) {
+
+		if(!cpu_active(cpu)) {
+			// skip inactive cpu
+			continue;
+		}
+
+		rq = cpu_rq(cpu);
+
+		if(rq->nr_running == 0) {
+			// if cpu has no tasks select it immediately
+			return cpu;
+		}
+
+		if(rq->nr_running < min_nr_running) {
+			min_nr_running = rq->nr_running;
+			new_cpu = cpu;
+		}
+	}
+
+	return new_cpu;
 }
 
 static void migrate_task_rq_mfq(struct task_struct *p, int new_cpu) {}

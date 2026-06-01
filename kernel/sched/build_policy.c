@@ -52,6 +52,10 @@
 #include "rt.c"
 #include "cpudeadline.c"
 
+#ifdef CONFIG_MFQ_SCHED
+#include "mfq.c"
+#endif // CONFIG_MFQ_SCHED
+
 #include "pelt.c"
 
 #include "cputime.c"

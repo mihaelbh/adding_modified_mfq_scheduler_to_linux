@@ -3177,18 +3177,6 @@ config HAVE_ATOMIC_IOMAP
 	def_bool y
 	depends on X86_32
 
-menu "MFQ scheduler"
-
-config MFQ_SCHED
-	bool "Use MFQ scheduler"
-	default y
-
-config MFQ_QUEUE_NUM
-	int "Number of MFQ scheduler queues"
-	default 4
-
-endmenu
-
 source "arch/x86/kvm/Kconfig"
 
 source "arch/x86/Kconfig.cpufeatures"

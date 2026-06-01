@@ -4,8 +4,14 @@
 #define STARVATION_PERIOD_MS	500
 
 static unsigned int get_rr_interval_mfq(struct rq *rq, struct task_struct *task);
+static void update_curr_mfq(struct rq *rq);
+static struct task_struct *pick_next_task_mfq(struct rq *rq, struct task_struct *prev, struct rq_flags *rf);
 
-// calculate prio from
+#ifdef CONFIG_SCHED_CORE
+static int task_is_throttled_mfq(struct task_struct *p, int cpu);
+#endif // CONFIG_SCHED_CORE
+
+// calculate prio
 static void calculate_prio(struct task_struct *p) {
 	u64 sleep = p->se.curr_sleep_time_nsec;
 	u64 exec = p->se.prev_processing_time_nsec;
@@ -64,6 +70,7 @@ static struct task_struct *get_highest_prio_task(struct rq *rq) {
 }
 
 // go through queues and find task that stopped executing first
+// used for finding task that is most likely starved
 static struct task_struct *get_first_stopped_task(struct rq *rq) {
 	int i;
 	struct sched_entity *se = list_first_entry_or_null(&rq->cfs.sched_queue[0], struct sched_entity, node);
@@ -99,6 +106,7 @@ static struct task_struct *get_first_stopped_task(struct rq *rq) {
 // ==============================================================================================================
 // sched_class functions
 
+// enqueues task
 static void enqueue_task_mfq(struct rq *rq, struct task_struct *p, int flags) {
 	if(rq == NULL || p == NULL) {
 		return;
@@ -117,6 +125,7 @@ static void enqueue_task_mfq(struct rq *rq, struct task_struct *p, int flags) {
 	put_in_queue(p, rq);
 }
 
+// dequeues task
 static bool dequeue_task_mfq(struct rq *rq, struct task_struct *p, int flags) {
 	if(rq == NULL || p == NULL) {
 		return false;
@@ -133,6 +142,9 @@ static bool dequeue_task_mfq(struct rq *rq, struct task_struct *p, int flags) {
 	return true;
 }
 
+// yields task
+// puts current task to the end of the queue
+// called from do_sched_yield() which calls schedule()
 static void yield_task_mfq(struct rq *rq) {
 	if(rq == NULL) {
 		return;
@@ -142,7 +154,9 @@ static void yield_task_mfq(struct rq *rq) {
 	list_move_tail(&rq->curr->se.node, &rq->cfs.sched_queue[rq->curr->se.prio]);
 }
 
-// currently it doesn't yield to task, it just yields
+// yields to specific task
+// first yields current task then sets the specified task as next
+// called form yield_to() function, which calls resched_curr()
 static bool yield_to_task_mfq(struct rq *rq, struct task_struct *p) {
 	if(rq == NULL) {
 		return false;
@@ -150,9 +164,23 @@ static bool yield_to_task_mfq(struct rq *rq, struct task_struct *p) {
 
 	yield_task_mfq(rq);
 
+	struct task_struct *next = get_highest_prio_task(rq);
+	if(next == p) {
+		// if the next task is the task we yield to just return
+		return true;
+	}
+
+	// else move task in front of the next task
+	rq->cfs.num_enqueued[p->se.prio]--;
+	p->se.prio = next->se.prio;
+	list_move(&p->se.node, &rq->cfs.sched_queue[p->se.prio]);
+	rq->cfs.num_enqueued[p->se.prio]++;
+
 	return true;
 }
 
+// called when a task wakes up
+// check if preempt is needed
 static void wakeup_preempt_mfq(struct rq *rq, struct task_struct *p, int wake_flags) {
 	if(rq == NULL || p == NULL) {
 		return;
@@ -162,15 +190,13 @@ static void wakeup_preempt_mfq(struct rq *rq, struct task_struct *p, int wake_fl
 		return;
 	}
 
-	if(rq->curr->sched_class == &idle_sched_class) {
-		resched_curr(rq);
-	}
-
 	if(rq->curr->se.prio > p->se.prio) {
 		resched_curr(rq);
 	}
 }
 
+// picks next task for execution
+// used by pick_next_task_mfq()
 static struct task_struct *pick_task_mfq(struct rq *rq, struct rq_flags *rf) {
 	if(rq == NULL) {
 		return NULL;
@@ -193,11 +219,14 @@ static struct task_struct *pick_task_mfq(struct rq *rq, struct rq_flags *rf) {
 	return highest_prio;
 }
 
+// picks next task for execution
+// returns result of pick_task_mfq()
 static struct task_struct *pick_next_task_mfq(struct rq *rq, struct task_struct *prev, struct rq_flags *rf) {
 	return pick_task_mfq(rq, rf);
 }
 
 // called when task stops executing
+// remember when it stopped executing and for how long did it execute
 static void put_prev_task_mfq(struct rq *rq, struct task_struct *prev, struct task_struct *next) {
 	prev->se.curr_stopped_executing_nsec = sched_clock();
 	prev->se.curr_processing_time_nsec += prev->se.curr_stopped_executing_nsec - prev->se.curr_started_executing_nsec;
@@ -258,15 +287,19 @@ static void rq_offline_mfq(struct rq *rq) {}
 
 static void task_dead_mfq(struct task_struct *p) {}
 
+// decides on which cpus the task is allowed to run
 static void set_cpus_allowed_mfq(struct task_struct *p, struct affinity_context *ctx) {
 	set_cpus_allowed_common(p, ctx);
 }
 
+// caled periodically with HZ frequency
+// lowers timeslice, check if timeslice needs to be lowered if a lot of tasks enqueued
+// if timeslice is 0, increase prio by 1 and requeue task and preempt
 static void task_tick_mfq(struct rq *rq, struct task_struct *curr, int queued) {
 	curr->se.timeslice--;
+	update_curr_mfq(rq);
 	if(curr->se.timeslice > 0) {
-
-		// if a bunch of tasks enqueued since the task started executing
+		// if a bunch of tasks were enqueued since the task started executing
 		// check if timeslice needs to be readjusted
 		unsigned int new_timeslice = get_rr_interval_mfq(rq, curr);
 		if(curr->se.timeslice > new_timeslice) {
@@ -280,7 +313,6 @@ static void task_tick_mfq(struct rq *rq, struct task_struct *curr, int queued) {
 	if(curr->se.prio < (CONFIG_MFQ_QUEUE_NUM - 1)) {
 		curr->se.prio++;
 	}
-
 	list_move_tail(&curr->se.node, &rq->cfs.sched_queue[curr->se.prio]);
 	rq->cfs.num_enqueued[curr->se.prio]++;
 
@@ -291,6 +323,8 @@ static void task_fork_mfq(struct task_struct *p) {}
 
 static void reweight_task_mfq(struct rq *rq, struct task_struct *p, const struct load_weight *lw) {}
 
+// if prio is changed (p->prio that uses SCHED_RR SCHED_FIFO and SCHED_NORMAL, not p->se.prio taht uses this scheduler)
+// check if preemption is needed
 static void prio_changed_mfq(struct rq *rq, struct task_struct *p, u64 oldprio) {
 	if(p == rq->curr) {
 		return;
@@ -330,15 +364,13 @@ static unsigned int get_rr_interval_mfq(struct rq *rq, struct task_struct *task)
 	return timeslice;
 }
 
+// called periodically from task_tick_mfq()
+// checks if preemption is needed
 static void update_curr_mfq(struct rq *rq) {
 	struct task_struct *p = get_highest_prio_task(rq);
 
 	if(p == NULL || rq->curr == NULL) {
 		return;
-	}
-
-	if(rq->curr->sched_class == &idle_sched_class) {
-		resched_curr(rq);
 	}
 
 	if(p->se.prio < rq->curr->se.prio) {
@@ -355,3 +387,55 @@ static int task_is_throttled_mfq(struct task_struct *p, int cpu) {
 	return 0;
 }
 #endif // CONFIG_SCHED_CORE
+
+#ifdef CONFIG_MFQ_SCHED
+
+DEFINE_SCHED_CLASS(fair) = {
+	.enqueue_task		= enqueue_task_mfq,
+	.dequeue_task		= dequeue_task_mfq,
+	.yield_task		= yield_task_mfq,
+	.yield_to_task		= yield_to_task_mfq,
+
+	.wakeup_preempt		= wakeup_preempt_mfq,
+
+	.pick_task		= pick_task_mfq,
+	.pick_next_task		= pick_next_task_mfq,
+	.put_prev_task		= put_prev_task_mfq,
+	.set_next_task          = set_next_task_mfq,
+
+	.select_task_rq		= select_task_rq_mfq,
+	.migrate_task_rq	= migrate_task_rq_mfq,
+
+	.rq_online		= rq_online_mfq,
+	.rq_offline		= rq_offline_mfq,
+
+	.task_dead		= task_dead_mfq,
+	.set_cpus_allowed	= set_cpus_allowed_mfq,
+
+	.task_tick		= task_tick_mfq,
+	.task_fork		= task_fork_mfq,
+
+	.reweight_task		= reweight_task_mfq,
+	.prio_changed		= prio_changed_mfq,
+	.switching_from		= switching_from_mfq,
+	.switched_from		= switched_from_mfq,
+	.switched_to		= switched_to_mfq,
+
+	.get_rr_interval	= get_rr_interval_mfq,
+
+	.update_curr		= update_curr_mfq,
+
+#ifdef CONFIG_FAIR_GROUP_SCHED
+	.task_change_group	= task_change_group_mfq,
+#endif
+
+#ifdef CONFIG_SCHED_CORE
+	.task_is_throttled	= task_is_throttled_mfq,
+#endif
+
+#ifdef CONFIG_UCLAMP_TASK
+	.uclamp_enabled		= 1,
+#endif
+};
+
+#endif // CONFIG_MFQ_SCHED

@@ -59,17 +59,6 @@
 #include "stats.h"
 #include "autogroup.h"
 
-#ifdef CONFIG_MFQ_SCHED
-
-static struct task_struct *pick_next_task_mfq(struct rq *rq, struct task_struct *prev, struct rq_flags *rf);
-
-#ifdef CONFIG_SCHED_CORE
-static int task_is_throttled_mfq(struct task_struct *p, int cpu);
-#endif // CONFIG_SCHED_CORE
-
-#include "mfq.c"
-#endif // CONFIG_MFQ_SCHED
-
 /*
  * The initial- and re-scaling of tunables is configurable
  *
@@ -314,7 +303,9 @@ static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
 	return delta;
 }
 
+#ifndef CONFIG_MFQ_SCHED
 const struct sched_class fair_sched_class;
+#endif // CONFIG_MFQ_SCHED
 
 /**************************************************************
  * CFS operations on generic schedulable entities:
@@ -14188,57 +14179,7 @@ static unsigned int get_rr_interval_fair(struct rq *rq, struct task_struct *task
 /*
  * All the scheduling class methods:
  */
-#ifdef CONFIG_MFQ_SCHED
-
-DEFINE_SCHED_CLASS(fair) = {
-	.enqueue_task		= enqueue_task_mfq,
-	.dequeue_task		= dequeue_task_mfq,
-	.yield_task		= yield_task_mfq,
-	.yield_to_task		= yield_to_task_mfq,
-
-	.wakeup_preempt		= wakeup_preempt_mfq,
-
-	.pick_task		= pick_task_mfq,
-	.pick_next_task		= pick_next_task_mfq,
-	.put_prev_task		= put_prev_task_mfq,
-	.set_next_task          = set_next_task_mfq,
-
-	.select_task_rq		= select_task_rq_mfq,
-	.migrate_task_rq	= migrate_task_rq_mfq,
-
-	.rq_online		= rq_online_mfq,
-	.rq_offline		= rq_offline_mfq,
-
-	.task_dead		= task_dead_mfq,
-	.set_cpus_allowed	= set_cpus_allowed_mfq,
-
-	.task_tick		= task_tick_mfq,
-	.task_fork		= task_fork_mfq,
-
-	.reweight_task		= reweight_task_mfq,
-	.prio_changed		= prio_changed_mfq,
-	.switching_from		= switching_from_mfq,
-	.switched_from		= switched_from_mfq,
-	.switched_to		= switched_to_mfq,
-
-	.get_rr_interval	= get_rr_interval_mfq,
-
-	.update_curr		= update_curr_mfq,
-
-#ifdef CONFIG_FAIR_GROUP_SCHED
-	.task_change_group	= task_change_group_mfq,
-#endif
-
-#ifdef CONFIG_SCHED_CORE
-	.task_is_throttled	= task_is_throttled_mfq,
-#endif
-
-#ifdef CONFIG_UCLAMP_TASK
-	.uclamp_enabled		= 1,
-#endif
-};
-
-#else // CONFIG_MFQ_SCHED
+#ifndef CONFIG_MFQ_SCHED
 
 DEFINE_SCHED_CLASS(fair) = {
 	.enqueue_task		= enqueue_task_fair,
@@ -14288,7 +14229,7 @@ DEFINE_SCHED_CLASS(fair) = {
 #endif
 };
 
-#endif // CONFIG_MFQ_SCHED
+#endif // not CONFIG_MFQ_SCHED
 
 void print_cfs_stats(struct seq_file *m, int cpu)
 {

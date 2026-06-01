@@ -32,3 +32,15 @@ source "lib/Kconfig.debug"
 source "Documentation/Kconfig"
 
 source "io_uring/Kconfig"
+
+
+menu "MFQ scheduler"
+
+config MFQ_SCHED
+	bool "Use MFQ scheduler"
+	default y
+
+config MFQ_QUEUE_NUM
+	int "Number of MFQ scheduler queues"
+	default 4
+endmenu

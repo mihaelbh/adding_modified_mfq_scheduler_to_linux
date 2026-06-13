@@ -4473,8 +4473,6 @@ static void __sched_fork(u64 clone_flags, struct task_struct *p)
 	p->se.curr_stopped_executing_nsec = 0;
 	p->se.curr_sleep_time_nsec = 0;
 
-	p->se.prev_prio = 0;
-	p->se.prev_become_ready_nsec = 0;
 	p->se.prev_gone_from_ready_nsec = 0;
 	p->se.prev_processing_time_nsec = 0;
 

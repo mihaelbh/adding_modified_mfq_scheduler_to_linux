@@ -588,8 +588,6 @@ struct sched_entity {
 	u64				curr_sleep_time_nsec;
 
 	/* previous run (before the last dequeued) */
-	u32				prev_prio;
-	u64				prev_become_ready_nsec;
 	u64				prev_gone_from_ready_nsec;
 	u64				prev_processing_time_nsec;
 

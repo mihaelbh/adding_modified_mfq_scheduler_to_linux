@@ -115,7 +115,7 @@ static void enqueue_task_mfq(struct rq *rq, struct task_struct *p, int flags) {
 
 	if(p->se.prev_gone_from_ready_nsec != 0) {
 		// enqueued before
-		p->se.curr_sleep_time_nsec += sched_clock() - p->se.prev_gone_from_ready_nsec;
+		p->se.curr_sleep_time_nsec = sched_clock() - p->se.prev_gone_from_ready_nsec;
 		calculate_prio(p);
 	} else {
 		// enqueued for the first time
@@ -134,8 +134,6 @@ static bool dequeue_task_mfq(struct rq *rq, struct task_struct *p, int flags) {
 
 	remove_from_queue(p, rq);
 
-	p->se.prev_prio = p->se.prio;
-	p->se.prev_become_ready_nsec = p->se.curr_become_ready_nsec;
 	p->se.prev_gone_from_ready_nsec = sched_clock();
 	p->se.prev_processing_time_nsec = p->se.curr_processing_time_nsec;
 	p->se.curr_processing_time_nsec = 0;

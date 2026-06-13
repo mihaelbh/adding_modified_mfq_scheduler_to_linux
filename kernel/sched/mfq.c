@@ -2,6 +2,7 @@
 
 #define STARVATION_COUNT	50
 #define STARVATION_PERIOD_MS	500
+#define MIN_TIMESLICE		5
 
 static unsigned int get_rr_interval_mfq(struct rq *rq, struct task_struct *task);
 static void update_curr_mfq(struct rq *rq);
@@ -186,10 +187,6 @@ static void wakeup_preempt_mfq(struct rq *rq, struct task_struct *p, int wake_fl
 		return;
 	}
 
-	if(p->sched_class != &fair_sched_class) {
-		return;
-	}
-
 	if(rq->curr->se.prio > p->se.prio) {
 		resched_curr(rq);
 	}
@@ -238,7 +235,10 @@ static void put_prev_task_mfq(struct rq *rq, struct task_struct *prev, struct ta
 // because timeslice depends on number of tasks enqueued
 static void set_next_task_mfq(struct rq *rq, struct task_struct *p, bool first) {
 	p->se.curr_started_executing_nsec = sched_clock();
-	p->se.timeslice = get_rr_interval_mfq(rq, p);
+	if(p->se.timeslice <= 0) {
+		// reset timeslice only if task spent all of the previous timeslice
+		p->se.timeslice = get_rr_interval_mfq(rq, p);
+	}
 }
 
 // select cpu to execute the task on
@@ -293,19 +293,12 @@ static void set_cpus_allowed_mfq(struct task_struct *p, struct affinity_context 
 }
 
 // caled periodically with HZ frequency
-// lowers timeslice, check if timeslice needs to be lowered if a lot of tasks enqueued
+// lowers timeslice
 // if timeslice is 0, increase prio by 1 and requeue task and preempt
 static void task_tick_mfq(struct rq *rq, struct task_struct *curr, int queued) {
 	curr->se.timeslice--;
 	update_curr_mfq(rq);
 	if(curr->se.timeslice > 0) {
-		// if a bunch of tasks were enqueued since the task started executing
-		// check if timeslice needs to be readjusted
-		unsigned int new_timeslice = get_rr_interval_mfq(rq, curr);
-		if(curr->se.timeslice > new_timeslice) {
-			curr->se.timeslice = new_timeslice;
-		}
-
 		return;
 	}
 
@@ -344,19 +337,16 @@ static void switched_to_mfq(struct rq *rq, struct task_struct *p) {}
 // calculate timeslice
 // each queue gets predefined timeslice 20ms, 40ms, 80ms, 160ms ...
 // that timeslice is then equally divided between the tasks in that queue
-//
-// for example task with prio 0 can get timeslice 20ms if it is the only one in the queue
-// or it can get timeslice 5ms if there is more than 4 tasks in the same queue
-// (it doesn't really make sense to go under 5ms timeslices)
+// if the timeslice is too small set it to minimal timeslice
 static unsigned int get_rr_interval_mfq(struct rq *rq, struct task_struct *task) {
 	unsigned int timeslice = ((2 << task->se.prio) * 10) * HZ / 1000;
-
 	unsigned int num_tasks = rq->cfs.num_enqueued[task->se.prio];
+
 	if(num_tasks > 1) {
 		timeslice = timeslice / num_tasks;
 	}
 
-	unsigned int min_timeslice = 5 * HZ / 1000;
+	unsigned int min_timeslice = MIN_TIMESLICE * HZ / 1000;
 	if(timeslice < min_timeslice) {
 		timeslice = min_timeslice;
 	}
@@ -365,12 +355,20 @@ static unsigned int get_rr_interval_mfq(struct rq *rq, struct task_struct *task)
 }
 
 // called periodically from task_tick_mfq()
+// checks if timeslice of current task needs to be readjusted
 // checks if preemption is needed
 static void update_curr_mfq(struct rq *rq) {
 	struct task_struct *p = get_highest_prio_task(rq);
 
 	if(p == NULL || rq->curr == NULL) {
 		return;
+	}
+
+	// if a bunch of tasks were enqueued since the task started executing
+	// check if timeslice needs to be readjusted
+	unsigned int new_timeslice = get_rr_interval_mfq(rq, rq->curr);
+	if(rq->curr->se.timeslice > new_timeslice) {
+		rq->curr->se.timeslice = new_timeslice;
 	}
 
 	if(p->se.prio < rq->curr->se.prio) {

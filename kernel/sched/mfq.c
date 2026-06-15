@@ -149,7 +149,6 @@ static void yield_task_mfq(struct rq *rq) {
 		return;
 	}
 
-	rq->curr->se.timeslice = get_rr_interval_mfq(rq, rq->curr);
 	list_move_tail(&rq->curr->se.node, &rq->cfs.sched_queue[rq->curr->se.prio]);
 }
 
@@ -356,17 +355,16 @@ static unsigned int get_rr_interval_mfq(struct rq *rq, struct task_struct *task)
 // checks if timeslice of current task needs to be readjusted
 // checks if preemption is needed
 static void update_curr_mfq(struct rq *rq) {
-	struct task_struct *p = get_highest_prio_task(rq);
-
-	if(p == NULL || rq->curr == NULL) {
-		return;
-	}
-
 	// if a bunch of tasks were enqueued since the task started executing
 	// check if timeslice needs to be readjusted
 	unsigned int new_timeslice = get_rr_interval_mfq(rq, rq->curr);
 	if(rq->curr->se.timeslice > new_timeslice) {
 		rq->curr->se.timeslice = new_timeslice;
+	}
+
+	struct task_struct *p = get_highest_prio_task(rq);
+	if(p == NULL || rq->curr == NULL) {
+		return;
 	}
 
 	if(p->se.prio < rq->curr->se.prio) {
